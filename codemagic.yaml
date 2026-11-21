@@ -1,0 +1,58 @@
+workflows:
+  metro-rush-ios:
+    name: Metro Rush iOS (Godot, unsigned IPA)
+    max_build_duration: 90
+    instance_type: mac_mini_m2
+    environment:
+      xcode: latest
+      vars:
+        GODOT_VERSION: "4.3-stable"
+    scripts:
+      - name: Unzip the game
+        script: |
+          set -e
+          unzip -q -o MetroRush_Godot.zip
+          ls MetroRushGodot
+      - name: Install Godot and export templates
+        script: |
+          set -e
+          curl -L -o godot.zip "https://github.com/godotengine/godot/releases/download/${GODOT_VERSION}/Godot_v${GODOT_VERSION}_macos.universal.zip"
+          unzip -q godot.zip
+          curl -L -o templates.tpz "https://github.com/godotengine/godot/releases/download/${GODOT_VERSION}/Godot_v${GODOT_VERSION}_export_templates.tpz"
+          mkdir -p tpl
+          unzip -q templates.tpz -d tpl
+          TDIR="$HOME/Library/Application Support/Godot/export_templates/4.3.stable"
+          mkdir -p "$TDIR"
+          mv tpl/templates/* "$TDIR/"
+      - name: Import project
+        script: |
+          GODOT="$CM_BUILD_DIR/Godot.app/Contents/MacOS/Godot"
+          cd MetroRushGodot
+          "$GODOT" --headless --path . --import || true
+          "$GODOT" --headless --path . --import || true
+      - name: Export iOS Xcode project
+        script: |
+          set -e
+          GODOT="$CM_BUILD_DIR/Godot.app/Contents/MacOS/Godot"
+          cd MetroRushGodot
+          mkdir -p build/ios
+          "$GODOT" --headless --path . --export-release "iOS" build/ios/MetroRush.ipa
+          ls -R build/ios | head -40
+      - name: Build unsigned archive
+        script: |
+          set -e
+          cd MetroRushGodot
+          PROJ=$(find build/ios -maxdepth 2 -name "*.xcodeproj" | head -1)
+          SCHEME=$(basename "$PROJ" .xcodeproj)
+          xcodebuild -project "$PROJ" -scheme "$SCHEME" -configuration Release -sdk iphoneos \
+            -archivePath build/App.xcarchive archive \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY=""
+      - name: Package unsigned IPA
+        script: |
+          set -e
+          cd MetroRushGodot
+          rm -rf build/Payload && mkdir -p build/Payload
+          cp -R build/App.xcarchive/Products/Applications/*.app build/Payload/
+          (cd build && zip -qr MetroRush-unsigned.ipa Payload)
+    artifacts:
+      - MetroRushGodot/build/MetroRush-unsigned.ipa
